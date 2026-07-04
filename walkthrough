@@ -1,0 +1,953 @@
+CNN From Scratch — Full Detailed Walkthrough
+
+This walkthrough explains the CNN implementation file-by-file in the exact order data flows through the network.
+
+The goal is not just:
+
+* what the code does
+
+but:
+
+* why it exists
+* what mathematical idea it represents
+* what shape transformations happen
+* how information and gradients flow
+* why deep learning frameworks are built this way
+
+⸻
+
+Big Picture First
+
+Our CNN currently looks like:
+
+Input Image
+→ Conv1
+→ ReLU1
+→ Pool1
+→ Conv2
+→ ReLU2
+→ Pool2
+→ Flatten
+→ Dense
+→ Softmax + CrossEntropy Loss
+
+Backward pass reverses this exactly:
+
+Loss
+← Dense
+← Pool2
+← ReLU2
+← Conv2
+← Pool1
+← ReLU1
+← Conv1
+
+This reversal exists because of:
+
+chain rule
+
+which is the mathematical foundation of backpropagation.
+
+⸻
+
+File 1 — layers/conv.py
+
+This file implements:
+
+convolution
+
+which is the core feature extraction operation of CNNs.
+
+⸻
+
+What Convolution Actually Is
+
+Convolution is fundamentally:
+
+local pattern matching
+
+The layer learns:
+
+* edges
+* textures
+* shapes
+* higher-level patterns
+
+by sliding small learned filters across the image.
+
+⸻
+
+Full Code
+
+import numpy as np
+class Conv2D:
+    def __init__(self, in_channels, out_channels, kernel_size,
+                 stride=1, padding=0):
+        self.stride = stride
+        self.padding = padding
+        self.kernel_size = kernel_size
+        self.weights = np.random.randn(
+            out_channels,
+            in_channels,
+            kernel_size,
+            kernel_size
+        ) * 0.01
+        self.bias = np.zeros((out_channels, 1))
+
+⸻
+
+init()
+
+This initializes the convolution layer.
+
+⸻
+
+in_channels
+
+Example:
+
+in_channels = 3
+
+for RGB images.
+
+Later layers:
+
+in_channels = 8
+
+because previous conv layer produced 8 feature maps.
+
+⸻
+
+out_channels
+
+This means:
+
+number of filters
+
+Each filter learns:
+
+* one visual pattern
+* one type of feature detector
+
+Each filter produces:
+
+one output feature map
+
+So:
+
+out_channels = 16
+
+means:
+
+16 learned feature maps
+
+⸻
+
+kernel_size
+
+This is spatial filter size.
+
+Example:
+
+kernel_size = 3
+
+means:
+
+3x3 spatial region
+
+⸻
+
+The Important Filter Shape
+
+self.weights.shape
+=
+(out_channels, in_channels, kernel_h, kernel_w)
+
+Example:
+
+(16,8,3,3)
+
+means:
+
+* 16 filters
+* each filter spans all 8 input channels
+* each channel slice is 3x3
+
+⸻
+
+Important CNN Insight
+
+A filter is NOT:
+
+just a 3x3 matrix
+
+A filter is:
+
+a 3D volume
+
+because it spans:
+
+* all input channels
+* local spatial region
+
+⸻
+
+Weight Initialization
+
+np.random.randn(...) * 0.01
+
+Weights begin as random noise.
+
+Training gradually reshapes them into:
+
+* edge detectors
+* texture detectors
+* semantic feature extractors
+
+⸻
+
+Why Small Initialization?
+
+Large random values can:
+
+* explode activations
+* destabilize gradients
+* make training chaotic
+
+Small initialization keeps early activations controlled.
+
+⸻
+
+Forward Pass
+
+def forward(self, x):
+
+Input shape:
+
+(batch_size, channels, height, width)
+
+Example:
+
+(4,3,224,224)
+
+meaning:
+
+* 4 images
+* RGB channels
+* 224x224 resolution
+
+⸻
+
+Store Input
+
+self.x = x
+
+Backward pass later needs original input.
+
+This is extremely common in neural networks.
+
+Forward pass stores intermediate tensors.
+Backward pass reuses them.
+
+⸻
+
+Extract Shapes
+
+N, C, H, W = x.shape
+
+Meaning:
+
+Variable	Meaning
+N	batch size
+C	channels
+H	height
+W	width
+
+⸻
+
+Filter Shapes
+
+F, _, HH, WW = self.weights.shape
+
+Variable	Meaning
+F	number of filters
+HH	kernel height
+WW	kernel width
+
+⸻
+
+Output Dimensions
+
+H_out = (H + 2*padding - HH)//stride + 1
+
+This computes:
+
+how many valid convolution positions exist
+
+Convolution slides spatially.
+
+This formula computes:
+
+* how many rows
+* how many columns
+
+fit after padding/stride.
+
+⸻
+
+Output Tensor
+
+out = np.zeros((N,F,H_out,W_out))
+
+Output shape:
+
+(batch_size, output_channels, output_height, output_width)
+
+⸻
+
+Padding
+
+x_padded = np.pad(...)
+
+Padding adds zeros around borders.
+
+Why?
+
+Without padding:
+
+* image shrinks every convolution
+* border information lost quickly
+
+Padding preserves spatial dimensions.
+
+Example:
+
+224x224
+→ still 224x224
+
+with:
+
+padding=1
+kernel=3
+
+⸻
+
+Main Convolution Loops
+
+for n in range(N):
+
+Iterate over images.
+
+⸻
+
+for f in range(F):
+
+Iterate over filters.
+
+Each filter produces:
+
+one feature map
+
+⸻
+
+for i in range(H_out):
+for j in range(W_out):
+
+Iterate over spatial positions.
+
+This is the sliding-window traversal.
+
+⸻
+
+Local Region Extraction
+
+region = x_padded[
+    n,
+    :,
+    h_start:h_start+HH,
+    w_start:w_start+WW
+]
+
+This extracts:
+
+small local patch
+across ALL channels
+
+Example shape:
+
+(8,3,3)
+
+for Conv2.
+
+⸻
+
+Actual Convolution
+
+np.sum(region * self.weights[f])
+
+This performs:
+
+elementwise multiplication
++
+summation
+
+which computes:
+
+similarity between region and filter
+
+High output:
+
+pattern detected strongly
+
+Low output:
+
+pattern absent
+
+⸻
+
+Bias
+
++ self.bias[f]
+
+Bias shifts activations.
+
+Allows neuron activation thresholds to move.
+
+⸻
+
+Conv Backward
+
+Backward propagation computes:
+
+how much each earlier activation
+and each filter weight
+contributed to loss
+
+⸻
+
+Incoming Gradient
+
+dout
+
+Shape:
+
+(batch_size, output_channels, output_height, output_width)
+
+Meaning:
+
+gradient wrt convolution output
+
+or:
+
+“How much did each output activation
+ affect final loss?”
+
+⸻
+
+Why dx Has Input Shape
+
+dx.shape
+=
+self.x.shape
+
+because backward output shape must equal forward input shape.
+
+This invariant exists for every layer.
+
+⸻
+
+Why dW Exists
+
+dW
+
+stores:
+
+gradient wrt filters
+
+This tells:
+
+how filters should change
+
+⸻
+
+Critical CNN Insight
+
+Same filter was reused everywhere spatially.
+
+So:
+
+all spatial usages contribute
+into same filter gradients
+
+This is:
+
+parameter sharing
+
+⸻
+
+The Most Important Line
+
+dW[f] += region * grad
+
+Meaning:
+
+this local image region
+contributed to output error
+
+So corresponding filter weights receive blame.
+
+⸻
+
+Why += ?
+
+Because:
+
+* filter reused everywhere
+* many spatial positions contribute
+* gradients accumulate
+
+⸻
+
+Input Gradient
+
+dx_padded += self.weights[f] * grad
+
+This redistributes blame backward into:
+
+the earlier feature maps
+
+Important:
+
+We are NOT reconstructing images.
+
+We are propagating:
+
+sensitivities / blame signals
+
+⸻
+
+Deep Backprop Insight
+
+Forward pass propagates:
+
+information
+
+Backward pass propagates:
+
+responsibility
+
+⸻
+
+File 2 — layers/relu.py
+
+ReLU introduces:
+
+nonlinearity
+
+Without nonlinearities:
+
+* deep networks collapse into linear transformations
+* depth becomes meaningless
+
+⸻
+
+Forward
+
+np.maximum(0,x)
+
+Meaning:
+
+negative values → 0
+positive values → unchanged
+
+⸻
+
+Why ReLU Matters
+
+ReLU creates:
+
+* sparsity
+* selective activation
+* nonlinear representational power
+
+Only useful neurons activate.
+
+⸻
+
+Backward
+
+dx[self.x <= 0] = 0
+
+Why?
+
+Derivative of ReLU:
+
+x > 0 → derivative = 1
+x <= 0 → derivative = 0
+
+So:
+
+* active neurons pass gradients
+* inactive neurons block gradients
+
+⸻
+
+File 3 — layers/pool.py
+
+Pooling performs:
+
+spatial downsampling
+
+Purpose:
+
+* reduce computation
+* increase receptive field
+* preserve strongest activations
+
+⸻
+
+Max Pooling
+
+Example:
+
+2 8
+1 3
+
+becomes:
+
+8
+
+Meaning:
+
+keep strongest local activation
+
+⸻
+
+Why Pooling Helps
+
+Pooling creates:
+
+* translation robustness
+* smaller tensors
+* less computation
+
+⸻
+
+Pool Backward
+
+Only max location contributed to output.
+
+So only max location receives gradient.
+
+Example:
+
+Forward:
+
+2 8
+1 3
+→ 8
+
+Backward:
+
+0 5
+0 0
+
+if incoming gradient was:
+
+5
+
+⸻
+
+Important Pooling Insight
+
+Pooling destroys information permanently.
+
+Yet backprop still works.
+
+Why?
+
+Because backprop is:
+
+dependency propagation
+
+NOT:
+
+input reconstruction
+
+⸻
+
+File 4 — layers/dense.py
+
+Dense layer performs:
+
+fully connected classification
+
+After convolutions extract features:
+
+* dense layer combines them globally
+* final class scores produced
+
+⸻
+
+Forward
+
+out = x @ W + b
+
+This is matrix multiplication.
+
+Each neuron computes:
+
+weighted sum
+
+of all input features.
+
+⸻
+
+Why Flatten Exists
+
+CNN outputs spatial tensors:
+
+(batch_size, channels, height, width)
+
+Dense layers expect vectors.
+
+So:
+
+reshape(batch_size, -1)
+
+converts spatial tensor into:
+
+one giant feature vector
+
+per image.
+
+⸻
+
+Dense Backward
+
+Computes:
+
+* weight gradients
+* bias gradients
+* input gradients
+
+⸻
+
+dW
+
+dW = self.x.T @ dout
+
+This computes:
+
+how much each weight
+contributed to loss
+
+⸻
+
+db
+
+db = np.sum(...)
+
+Bias shared across batch.
+
+So gradients accumulate across samples.
+
+⸻
+
+dx
+
+dx = dout @ self.W.T
+
+Propagates gradients backward into:
+
+earlier features
+
+⸻
+
+Actual Learning Step
+
+self.W -= learning_rate * dW
+
+This is:
+
+gradient descent
+
+The actual parameter update.
+
+Everything before this computes blame.
+
+This line changes the model.
+
+⸻
+
+File 5 — layers/losses.py
+
+This file computes:
+
+* probabilities
+* prediction error
+* starting gradient for backprop
+
+⸻
+
+Softmax
+
+Converts logits into probabilities.
+
+Example:
+
+[2.1,0.3]
+→
+[0.86,0.14]
+
+⸻
+
+Why Exponentials?
+
+Exponentials:
+
+* make outputs positive
+* amplify confident predictions
+* normalize into probability distribution
+
+⸻
+
+Cross Entropy
+
+Measures:
+
+how wrong predictions are
+
+Low loss:
+
+* correct class probability high
+
+High loss:
+
+* wrong predictions confident
+
+⸻
+
+Backward
+
+This beautiful simplification appears:
+
+prediction - truth
+
+This becomes:
+
+initial blame signal
+
+for the entire network.
+
+⸻
+
+File 6 — models/simple_cnn.py
+
+This file assembles all layers into:
+
+one computational graph
+
+⸻
+
+Forward Pass
+
+Layers execute sequentially.
+
+Each layer transforms representation space.
+
+Early layers:
+
+* edges
+* textures
+
+Later layers:
+
+* higher abstractions
+
+⸻
+
+Important CNN Insight
+
+Channels stop meaning:
+
+RGB colors
+
+and become:
+
+learned feature representations
+
+⸻
+
+before_flatten_shape
+
+Stored because flatten destroys geometry.
+
+Backward pass later restores:
+
+spatial structure
+
+using reshape.
+
+⸻
+
+Backward Pass
+
+Backward executes layers in reverse.
+
+This exactly mirrors computational dependencies.
+
+Each layer:
+
+1. receives upstream gradient
+2. computes local gradients
+3. passes gradient backward
+
+⸻
+
+Deep Learning Framework Insight
+
+This architecture is already conceptually similar to:
+
+* PyTorch modules
+* TensorFlow layers
+* JAX computational graphs
+
+Modern frameworks simply:
+
+* vectorize aggressively
+* optimize memory
+* automate gradients
+* run on GPUs
+
+But fundamentally:
+
+forward
+→ backward
+→ parameter update
+
+is still the core engine.
+
+⸻
+
+Final Important Insight
+
+Neural networks are NOT:
+
+magic intelligence systems
+
+At their core they are:
+
+large differentiable programs
+
+where:
+
+* forward computes predictions
+* backward computes sensitivities
+* gradient descent adjusts parameters
+
+The entire field of deep learning emerges from repeatedly applying:
+
+chain rule + optimization
+
+at massive scale.
